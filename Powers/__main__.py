@@ -3,6 +3,14 @@ import asyncio
 import importlib
 from platform import system
 
+# === uvloop setup before importing Pyrogram ===
+if system() != "Windows":
+    try:
+        import uvloop
+        uvloop.install()
+    except Exception as e:
+        print(f"[WARN] uvloop not available: {e}")
+
 from pyrogram import idle
 from pytgcalls.exceptions import NoActiveGroupCall
 
@@ -20,29 +28,9 @@ from Powers.bot_class import Gojo
 log = LOGGER(__name__)
 
 
-# === uvloop setup ===
-if system() == "Windows":
-    log.info("Windows system detected, skipping uvloop")
-else:
-    log.info("Attempting to install uvloop")
-    try:
-        os.system("pip3 install uvloop")
-        import uvloop
-        uvloop.install()
-        log.info("uvloop installed successfully")
-    except Exception as e:
-        log.info(f"Failed to install uvloop, continuing without it: {e}")
-
-
 async def init():
     # Validate assistant session strings
-    if (
-        not config.STRING1
-        and not config.STRING2
-        and not config.STRING3
-        and not config.STRING4
-        and not config.STRING5
-    ):
+    if not any([config.STRING1, config.STRING2, config.STRING3, config.STRING4, config.STRING5]):
         log.error("Assistant client variables not defined, exiting...")
         raise SystemExit
 
@@ -50,19 +38,17 @@ async def init():
 
     # Load banned users from DB
     try:
-        users = await get_gbanned()
-        BANNED_USERS.update(users)
-        users = await get_banned_users()
-        BANNED_USERS.update(users)
+        BANNED_USERS.update(await get_gbanned())
+        BANNED_USERS.update(await get_banned_users())
     except Exception as e:
         log.warning(f"Failed to fetch banned users: {e}")
 
-    # Start all clients
+    # Start Pyrogram clients
     await app.start()
     await userbot.start()
 
     gojo = Gojo()
-    await gojo.start()   # if Gojo only has run(), we’ll adapt separately
+    await gojo.start()   # ⚠️ if only .run() exists, we’ll adapt
 
     # Load Aviax plugins
     for all_module in ALL_MODULES:
@@ -74,9 +60,7 @@ async def init():
     try:
         await Aviax.stream_call("https://te.legra.ph/file/29f784eb49d230ab62e9e.mp4")
     except NoActiveGroupCall:
-        log.error(
-            "Please turn on the videochat of your log group/channel.\n\nStopping Bot..."
-        )
+        log.error("Please turn on the videochat of your log group/channel.\n\nStopping Bot...")
         raise SystemExit
     except Exception:
         pass
@@ -85,7 +69,7 @@ async def init():
     log.info("Aviax Music Started Successfully.")
     log.info("Gojo Bot Started Successfully.")
 
-    # Keep alive until SIGINT / SIGTERM
+    # Keep alive until Ctrl+C / SIGTERM
     await idle()
 
     # Shutdown sequence
