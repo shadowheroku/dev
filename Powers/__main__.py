@@ -17,7 +17,6 @@ from config import BANNED_USERS
 from Powers.bot_class import Gojo
 
 
-# get logger instance
 log = LOGGER(__name__)
 
 
@@ -31,8 +30,8 @@ else:
         import uvloop
         uvloop.install()
         log.info("uvloop installed successfully")
-    except:
-        log.info("Failed to install uvloop, continuing without it")
+    except Exception as e:
+        log.info(f"Failed to install uvloop, continuing without it: {e}")
 
 
 async def init():
@@ -45,26 +44,27 @@ async def init():
         and not config.STRING5
     ):
         log.error("Assistant client variables not defined, exiting...")
-        exit()
+        raise SystemExit
 
     await sudo()
 
     # Load banned users from DB
     try:
         users = await get_gbanned()
-        for user_id in users:
-            BANNED_USERS.add(user_id)
+        BANNED_USERS.update(users)
         users = await get_banned_users()
-        for user_id in users:
-            BANNED_USERS.add(user_id)
+        BANNED_USERS.update(users)
     except Exception as e:
         log.warning(f"Failed to fetch banned users: {e}")
 
-    # Start bots
+    # Start all clients
     await app.start()
     await userbot.start()
 
-    # Load all modules
+    gojo = Gojo()
+    await gojo.start()   # if Gojo only has run(), we’ll adapt separately
+
+    # Load Aviax plugins
     for all_module in ALL_MODULES:
         importlib.import_module("AviaxMusic.plugins" + all_module)
     log.info("Successfully Imported AviaxMusic Modules...")
@@ -77,27 +77,23 @@ async def init():
         log.error(
             "Please turn on the videochat of your log group/channel.\n\nStopping Bot..."
         )
-        exit()
+        raise SystemExit
     except Exception:
         pass
 
     await Aviax.decorators()
     log.info("Aviax Music Started Successfully.")
-
-    # Start Gojo bot
-    gojo = Gojo()
-    await gojo.start()   # if Gojo only has .run(), we’ll need to adapt
     log.info("Gojo Bot Started Successfully.")
 
-    # Keep both alive
+    # Keep alive until SIGINT / SIGTERM
     await idle()
 
     # Shutdown sequence
     await app.stop()
     await userbot.stop()
     await gojo.stop()
-    log.info("Stopping Aviax Music + Gojo Bot...")
+    log.info("Stopped Aviax Music + Gojo Bot.")
 
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(init())
+    asyncio.run(init())
