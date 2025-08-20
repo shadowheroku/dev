@@ -1,71 +1,123 @@
-from html import escape as escape_html
+import asyncio
 import time
-from typing import Dict, List
 
-from pyrogram.enums import ChatMemberStatus as CMS, ChatMembersFilter
-from pyrogram.errors import ChatAdminRequired, RightForbidden, RPCError
-from pyrogram.types import Message
+from pyrogram import filters
+from pyrogram.enums import ChatMembersFilter
+from pyrogram.types import CallbackQuery, Message
 
-from Powers import LOGGER
-from Powers.bot_class import Gojo
-from Powers.utils.custom_filters import admin_filter, command
+from AviaxMusic import app
+from AviaxMusic.core.call import Aviax
+from AviaxMusic.misc import db
+from AviaxMusic.utils.database import get_assistant, get_authuser_names, get_cmode
+from AviaxMusic.utils.decorators import ActualAdminCB, AdminActual, language
+from AviaxMusic.utils.formatters import alpha_to_int, get_readable_time
+from config import BANNED_USERS, adminlist, lyrical
 
-def get_readable_time(seconds: int) -> str:
-    """Convert seconds to a human-readable time format (D days, HH:MM:SS)."""
-    seconds = int(seconds)
-    days, seconds = divmod(seconds, 86400)
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
+rel = {}
 
-    time_parts = []
-    if days > 0:
-        time_parts.append(f"{days}d")
-    if hours > 0:
-        time_parts.append(f"{hours}h")
-    if minutes > 0:
-        time_parts.append(f"{minutes}m")
-    if seconds > 0:
-        time_parts.append(f"{seconds}s")
 
-    return " ".join(time_parts) if time_parts else "0s"
-
-# Store chat admins with type hints
-adminlist: Dict[int, List[int]] = {}
-
-# cooldown tracker with type hints
-_admin_reload_cooldown: Dict[int, float] = {}
-
-@Gojo.on_message(command(["reload", "admincache", "refresh"]) & admin_filter)
-async def reload_admin_cache(c: Gojo, m: Message):
+@app.on_message(
+    filters.command(["admincache", "reload", "refresh"]) & filters.group & ~BANNED_USERS
+)
+@language
+async def reload_admin_cache(client, message: Message, _):
     try:
-        now = time.time()
-        chat_id = m.chat.id
+        if message.chat.id not in rel:
+            rel[message.chat.id] = {}
+        else:
+            saved = rel[message.chat.id]
+            if saved > time.time():
+                left = get_readable_time((int(saved) - int(time.time())))
+                return await message.reply_text(_["reload_1"].format(left))
+        adminlist[message.chat.id] = []
+        async for user in app.get_chat_members(
+            message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS
+        ):
+            if user.privileges.can_manage_video_chats:
+                adminlist[message.chat.id].append(user.user.id)
+        authusers = await get_authuser_names(message.chat.id)
+        for user in authusers:
+            user_id = await alpha_to_int(user)
+            adminlist[message.chat.id].append(user_id)
+        now = int(time.time()) + 180
+        rel[message.chat.id] = now
+        await message.reply_text(_["reload_2"])
+    except:
+        await message.reply_text(_["reload_3"])
 
-        # cooldown check
-        if chat_id in _admin_reload_cooldown and _admin_reload_cooldown[chat_id] > now:
-            left = get_readable_time(int(_admin_reload_cooldown[chat_id] - now))
-            return await m.reply_text(f"Please wait {left} before reloading again.")
 
-        # Clear existing admin list for this chat
-        adminlist[chat_id] = []
+@app.on_message(filters.command(["reboot"]) & filters.group & ~BANNED_USERS)
+@AdminActual
+async def restartbot(client, message: Message, _):
+    mystic = await message.reply_text(_["reload_4"].format(app.mention))
+    await asyncio.sleep(1)
+    try:
+        db[message.chat.id] = []
+        await Aviax.stop_stream_force(message.chat.id)
+    except:
+        pass
+    userbot = await get_assistant(message.chat.id)
+    try:
+        if message.chat.username:
+            await userbot.resolve_peer(message.chat.username)
+        else:
+            await userbot.resolve_peer(message.chat.id)
+    except:
+        pass
+    chat_id = await get_cmode(message.chat.id)
+    if chat_id:
+        try:
+            got = await app.get_chat(chat_id)
+        except:
+            pass
+        userbot = await get_assistant(chat_id)
+        try:
+            if got.username:
+                await userbot.resolve_peer(got.username)
+            else:
+                await userbot.resolve_peer(chat_id)
+        except:
+            pass
+        try:
+            db[chat_id] = []
+            await Aviax.stop_stream_force(chat_id)
+        except:
+            pass
+    return await mystic.edit_text(_["reload_5"].format(app.mention))
 
-        # Fetch new admin list
-        async for member in c.get_chat_members(chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
-            if member.status in {CMS.ADMINISTRATOR, CMS.OWNER}:
-                adminlist[chat_id].append(member.user.id)
 
-        # Set cooldown (3 minutes)
-        _admin_reload_cooldown[chat_id] = now + 180  
-        
-        await m.reply_text("✅ Admin cache updated successfully!")
+@app.on_callback_query(filters.regex("close") & ~BANNED_USERS)
+async def close_menu(_, CallbackQuery):
+    try:
+        await CallbackQuery.answer()
+        await CallbackQuery.message.delete()
+        await CallbackQuery.message.reply_text(
+            f"Cʟᴏsᴇᴅ ʙʏ : {CallbackQuery.from_user.mention}"
+        )
+    except:
+        pass
 
-    except ChatAdminRequired:
-        await m.reply_text("❌ I need to be an admin to reload the admin cache.")
-    except RightForbidden:
-        await m.reply_text("❌ I don't have enough rights to fetch admin list.")
-    except RPCError as ef:
-        error_msg = f"""Some error occurred while reloading admin cache.
 
-<b>Error:</b> <code>{escape_html(str(ef))}</code>"""
-        await m.reply_text(error_msg)
-        LOGGER.error(f"Error in admincache reload: {ef}", exc_info=True)
+@app.on_callback_query(filters.regex("stop_downloading") & ~BANNED_USERS)
+@ActualAdminCB
+async def stop_download(client, CallbackQuery: CallbackQuery, _):
+    message_id = CallbackQuery.message.id
+    task = lyrical.get(message_id)
+    if not task:
+        return await CallbackQuery.answer(_["tg_4"], show_alert=True)
+    if task.done() or task.cancelled():
+        return await CallbackQuery.answer(_["tg_5"], show_alert=True)
+    if not task.done():
+        try:
+            task.cancel()
+            try:
+                lyrical.pop(message_id)
+            except:
+                pass
+            await CallbackQuery.answer(_["tg_6"], show_alert=True)
+            return await CallbackQuery.edit_message_text(
+                _["tg_7"].format(CallbackQuery.from_user.mention)
+            )
+        except:
+            return await CallbackQuery.answer(_["tg_8"], show_alert=True)
+    await CallbackQuery.answer(_["tg_9"], show_alert=True)
