@@ -3,16 +3,15 @@ import asyncio
 import importlib
 from platform import system
 
-# ===== uvloop must be installed first =====
+# Install uvloop BEFORE Pyrogram clients
 if system() != "Windows":
     try:
         import uvloop
         uvloop.install()
-        print("[INFO] uvloop installed and set as default event loop")
+        print("[INFO] uvloop installed and set as default loop")
     except Exception as e:
         print(f"[WARN] uvloop not available: {e}")
 
-# ===== now import Pyrogram and other clients =====
 from pyrogram import idle
 from pytgcalls.exceptions import NoActiveGroupCall
 
@@ -27,7 +26,6 @@ from config import BANNED_USERS
 from Powers.bot_class import Gojo
 
 log = LOGGER(__name__)
-
 
 async def start_all():
     # Validate assistant strings
@@ -48,7 +46,7 @@ async def start_all():
     await app.start()
     await userbot.start()
 
-    # Start Gojo bot in a background task
+    # Start Gojo in a background task
     gojo = Gojo()
     task_gojo = asyncio.create_task(gojo.run())  # if only .run() exists
 
@@ -63,8 +61,6 @@ async def start_all():
         await Aviax.stream_call("https://te.legra.ph/file/29f784eb49d230ab62e9e.mp4")
     except NoActiveGroupCall:
         log.error("Turn on videochat of your log group/channel")
-    except Exception:
-        pass
 
     await Aviax.decorators()
     log.info("Aviax Music started")
@@ -75,9 +71,14 @@ async def start_all():
     # Shutdown
     await app.stop()
     await userbot.stop()
-    await gojo.stop() if hasattr(gojo, "stop") else task_gojo.cancel()
+    if hasattr(gojo, "stop"):
+        await gojo.stop()
+    else:
+        task_gojo.cancel()
     log.info("All clients stopped")
 
-
+# ---- MAIN ----
 if __name__ == "__main__":
-    asyncio.run(start_all())
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_all())
+    loop.run_forever()
